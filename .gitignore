@@ -1,0 +1,7 @@
+__pycache__/
+.ipynb_checkpoints/
+clave_nasa.txt
+.streamlit/secrets.toml
+.venv/
+data/en_vivo.csv
+data/vision/
