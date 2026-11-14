@@ -1,0 +1,16 @@
+[theme]
+base = "dark"
+primaryColor = "#3ee0ff"
+backgroundColor = "#050a14"
+secondaryBackgroundColor = "#0c1b2c"
+textColor = "#d9e6f5"
+linkColor = "#6fd8ff"
+borderColor = "#1c3550"
+baseRadius = "10px"
+font = "'IBM Plex Sans', sans-serif"
+headingFont = "'Chakra Petch', sans-serif"
+codeFont = "'JetBrains Mono', monospace"
+
+[theme.sidebar]
+backgroundColor = "#07111f"
+secondaryBackgroundColor = "#0c1b2c"
