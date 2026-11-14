@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<!--
+  ATRAPA EL METEORITO - prueba de reacción convertida en juego
+  Crew Health Monitor · NASA Space Apps Challenge 2026
+
+  Aparecen meteoritos en momentos al azar; hay que tocarlos lo más rápido posible.
+  Mide el tiempo de reacción (como una versión corta de la prueba PVT de NASA)
+  y se lo devuelve a la app de Streamlit.
+-->
+<style>
+  html, body { margin: 0; padding: 0; font-family: "Chakra Petch", system-ui, sans-serif; background: transparent; }
+  #juego { position: relative; width: 100%; height: 300px; border-radius: 14px; overflow: hidden; cursor: crosshair; box-sizing: border-box;
+           border: 1px solid rgba(98,180,220,.3); user-select: none;
+           background: linear-gradient(rgba(98,180,220,.05) 1px, transparent 1px) 0 0/30px 30px,
+                       linear-gradient(90deg, rgba(98,180,220,.05) 1px, transparent 1px) 0 0/30px 30px,
+                       radial-gradient(ellipse at 30% 20%, #12305a 0%, #071226 60%, #03060d 100%); }
+  #juego::before, #juego::after { content: ""; position: absolute; width: 18px; height: 18px; border: 2px solid #3ee0ff; opacity: .7; pointer-events: none; }
+  #juego::before { top: 6px; left: 6px; border-right: 0; border-bottom: 0; }
+  #juego::after { bottom: 6px; right: 6px; border-left: 0; border-top: 0; }
+  .estrella { position: absolute; width: 2px; height: 2px; background: #fff; border-radius: 50%; opacity: .7; }
+  #meteoro { position: absolute; width: 58px; height: 58px; display: none; transform: translate(-50%, -50%); }
+  #meteoro .roca { width: 100%; height: 100%; border-radius: 50%;
+           background: radial-gradient(circle at 35% 35%, #ffd27a 0%, #f08a24 45%, #b4471b 75%, #5a1f0c 100%);
+           box-shadow: 0 0 22px 6px rgba(255, 140, 40, .55); }
+  #meteoro .cola { position: absolute; right: 70%; top: 30%; width: 70px; height: 22px; border-radius: 12px;
+           background: linear-gradient(90deg, rgba(255,160,60,0) 0%, rgba(255,160,60,.6) 100%); transform: rotate(-25deg); }
+  #panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+           color: #e8ecff; text-align: center; gap: 10px; padding: 16px; }
+  #panel h2 { margin: 0; font-size: 24px; letter-spacing: .06em; text-transform: uppercase; }
+  #panel p { margin: 0; max-width: 460px; line-height: 1.4; opacity: .9; }
+  button { font: inherit; font-weight: 700; font-size: 15px; letter-spacing: .1em; text-transform: uppercase; padding: 11px 26px;
+           border-radius: 10px; border: 0; background: linear-gradient(135deg, #3ee0ff, #2f7bff); color: #021019; cursor: pointer;
+           box-shadow: 0 6px 22px rgba(47,123,255,.4); transition: transform .15s, box-shadow .2s; }
+  button:hover { box-shadow: 0 8px 30px rgba(62,224,255,.55); transform: translateY(-1px); }
+  button:active { transform: scale(.96); }
+  #hud { position: absolute; top: 12px; left: 30px; right: 30px; display: flex; justify-content: space-between;
+         color: #9fe9ff; font-family: "JetBrains Mono", monospace; font-size: 13px; pointer-events: none; }
+  .boom { position: absolute; color: #ffe08a; font-weight: 700; font-size: 18px; transform: translate(-50%, -50%);
+          pointer-events: none; animation: sube .7s ease-out forwards; }
+  @keyframes sube { to { opacity: 0; transform: translate(-50%, -140%); } }
+</style>
+</head>
+<body>
+<div id="juego">
+  <div id="hud"><span id="ronda"></span><span id="ultimo"></span></div>
+  <div id="meteoro"><div class="cola"></div><div class="roca"></div></div>
+  <div id="panel"><h2 id="titulo"></h2><p id="texto"></p><button id="boton"></button></div>
+</div>
+<script>
+  // ---- Comunicación con Streamlit (protocolo de componentes, sin librerías) ----
+  function enviar(tipo, datos) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: tipo }, datos), "*");
+  }
+  function ajustarAltura() { enviar("streamlit:setFrameHeight", { height: 310 }); }
+  function devolverValor(valor) { enviar("streamlit:setComponentValue", { value: valor, dataType: "json" }); }
+
+  // ---- Textos (los manda la app según el idioma) ----
+  let T = {
+    titulo: "Atrapa el meteorito", texto: "Toca cada meteorito lo más rápido que puedas.",
+    empezar: "Empezar", ronda: "Ronda", espera: "Espera…", listo: "¡Listo!",
+    resultado: "Tu tiempo de reacción", otra: "Jugar otra vez", temprano: "¡Muy pronto! Espera a que aparezca."
+  };
+  const RONDAS = 5;
+  window.addEventListener("message", (e) => {
+    if (e.data && e.data.type === "streamlit:render") {
+      if (e.data.args && e.data.args.textos) {
+        T = Object.assign(T, e.data.args.textos);
+        if (estado === "inicio") pantallaInicio();
+      }
+      ajustarAltura();
+    }
+  });
+
+  // ---- Fondo de estrellas ----
+  const juego = document.getElementById("juego");
+  for (let i = 0; i < 70; i++) {
+    const s = document.createElement("div");
+    s.className = "estrella";
+    s.style.left = Math.random() * 100 + "%";
+    s.style.top = Math.random() * 100 + "%";
+    s.style.opacity = (0.3 + Math.random() * 0.7).toFixed(2);
+    juego.appendChild(s);
+  }
+
+  // ---- Lógica del juego ----
+  const meteoro = document.getElementById("meteoro"), panel = document.getElementById("panel");
+  const boton = document.getElementById("boton"), hudRonda = document.getElementById("ronda"),
+        hudUltimo = document.getElementById("ultimo");
+  let estado = "inicio", tiempos = [], tempranos = 0, aparecio = 0, temporizador = null;
+
+  function pantallaInicio() {
+    document.getElementById("titulo").textContent = "☄️ " + T.titulo;
+    document.getElementById("texto").textContent = T.texto;
+    boton.textContent = T.empezar;
+    panel.style.display = "flex"; hudRonda.textContent = ""; hudUltimo.textContent = "";
+  }
+
+  function siguienteRonda() {
+    if (tiempos.length >= RONDAS) return terminar();
+    estado = "esperando";
+    hudRonda.textContent = `${T.ronda} ${tiempos.length + 1}/${RONDAS} · ${T.espera}`;
+    const espera = 1000 + Math.random() * 2500;          // tiempo al azar: no se puede adivinar
+    temporizador = setTimeout(() => {
+      meteoro.style.left = (12 + Math.random() * 76) + "%";
+      meteoro.style.top = (20 + Math.random() * 65) + "%";
+      meteoro.style.display = "block";
+      aparecio = performance.now();
+      estado = "visible";
+    }, espera);
+  }
+
+  function terminar() {
+    estado = "fin"; hudRonda.textContent = "";
+    const orden = [...tiempos].sort((a, b) => a - b);
+    const mediana = Math.round(orden[Math.floor(orden.length / 2)]);
+    document.getElementById("titulo").textContent = `${T.resultado}: ${mediana} ms`;
+    document.getElementById("texto").textContent = tiempos.map(t => Math.round(t) + " ms").join(" · ");
+    boton.textContent = T.otra;
+    panel.style.display = "flex";
+    devolverValor({ ms: mediana, tiempos: tiempos.map(Math.round), tempranos: tempranos, momento: Date.now() });
+  }
+
+  boton.addEventListener("click", (e) => {
+    e.stopPropagation();
+    tiempos = []; tempranos = 0; panel.style.display = "none"; hudUltimo.textContent = "";
+    siguienteRonda();
+  });
+
+  meteoro.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    if (estado !== "visible") return;
+    const t = performance.now() - aparecio;
+    tiempos.push(t);
+    meteoro.style.display = "none";
+    const b = document.createElement("div");
+    b.className = "boom"; b.textContent = Math.round(t) + " ms";
+    b.style.left = meteoro.style.left; b.style.top = meteoro.style.top;
+    juego.appendChild(b); setTimeout(() => b.remove(), 800);
+    hudUltimo.textContent = Math.round(t) + " ms";
+    siguienteRonda();
+  });
+
+  juego.addEventListener("pointerdown", () => {
+    if (estado === "esperando") {             // tocó antes de que apareciera
+      tempranos += 1; hudUltimo.textContent = T.temprano;
+      clearTimeout(temporizador); siguienteRonda();
+    }
+  });
+
+  pantallaInicio();
+  enviar("streamlit:componentReady", { apiVersion: 1 });
+  ajustarAltura();
+</script>
+</body>
+</html>
